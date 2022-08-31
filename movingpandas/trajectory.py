@@ -163,19 +163,15 @@ class Trajectory:
         return pymeos_point
 
     def _create_pymeos_seq(self): 
-        # TODO: optimize the construction of pymeos sequence
-        # Currently update pymeos point column before creating sequence
-        self._create_pymeos_point_column()
-        if self.is_latlon:
-            pymeos_seq = pymeos.TGeogPointSeq(
-                instant_list=self.df[self.get_pymeos_point_column_name()], 
-                normalize=False
-            )
-        else:
-            pymeos_seq = pymeos.TGeomPointSeq(
-                instant_list=self.df[self.get_pymeos_point_column_name()], 
-                normalize=False
-            )
+        x = list()
+        y = list()
+        for p in self.df.geometry:
+            x.append(p.x)
+            y.append(p.y)
+        times = self.df.index
+        
+        pymeos_seq = pymeos.TPointSeq.from_arrays(times, x, y, None, \
+            self.df.crs.to_epsg(), self.is_latlon, True, True, True, False)
         return pymeos_seq
 
     def _check_timezone_exist(self):
