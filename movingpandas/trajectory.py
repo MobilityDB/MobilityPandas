@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
 
 import warnings
-
-from shapely.affinity import translate
-from shapely.geometry import Point, LineString
 from datetime import datetime
-from pandas import DataFrame, to_datetime
-from pandas.core.indexes.datetimes import DatetimeIndex
+
 from geopandas import GeoDataFrame
 from geopy.distance import geodesic
+from pandas import DataFrame, to_datetime
+from pandas.core.indexes.datetimes import DatetimeIndex
+from shapely.affinity import translate
+from shapely.geometry import Point, LineString
 
 try:
-    import pymeos
+    import pymeos as pymeos
+
     # TODO: design issue: when to initialize and finalize
     pymeos.meos_initialize()
 except ImportError:
+    warnings.warn('PyMEOS is not installed')
     pymeos = None
 
 try:
@@ -22,7 +24,6 @@ try:
 except ImportError:
     from fiona.crs import from_epsg
 
-from . import _compat as compat
 from .overlay import clip, intersection, intersects, create_entry_and_exit_points
 from .time_range_utils import SpatioTemporalRange
 from .geometry_utils import (
@@ -40,21 +41,23 @@ DISTANCE_COL_NAME = "distance"
 TIMEDELTA_COL_NAME = "timedelta"
 PYMEOS_POINT_COL_NAME = "_pymeos_point_instance"
 
+
 class MissingCRSWarning(UserWarning, ValueError):
     pass
 
 
 class Trajectory:
     def __init__(
-        self,
-        df,
-        traj_id,
-        obj_id=None,
-        t=None,
-        x=None,
-        y=None,
-        crs="epsg:4326",
-        parent=None,
+            self,
+            df,
+            traj_id,
+            obj_id=None,
+            t=None,
+            x=None,
+            y=None,
+            crs="epsg:4326",
+            parent=None,
+            pymeos_backend=False
     ):
         """
         Create Trajectory from GeoDataFrame or DataFrame.
@@ -142,36 +145,39 @@ class Trajectory:
             self.is_latlon = crs.is_geographic
         except NameError:
             self.is_latlon = self.crs["init"] == from_epsg(4326)["init"]
-        if compat.USE_PYMEOS:
+        self.pymeos_backend = pymeos_backend and pymeos is not None
+        if self.pymeos_backend:
+            self._recreate_pymeos = False
             self._pymeos_point_column_name = PYMEOS_POINT_COL_NAME
-            
+            self._pymeos_sequence = self._create_pymeos_seq()
+
     def _create_pymeos_point_column(self):
         self.df[self.get_pymeos_point_column_name()] = \
             self.df.apply(self._create_pymeos_point, axis=1)
 
-    def _create_pymeos_point(self, row): 
+    def _create_pymeos_point(self, row):
         if self.is_latlon:
             pymeos_point = pymeos.TGeogPointInst(
                 string=f"{row[self.get_geom_column_name()]}@{row.name}",
                 srid=self.crs
             )
         else:
-            pymeos_point =  pymeos.TGeomPointInst(
+            pymeos_point = pymeos.TGeomPointInst(
                 string=f"{row[self.get_geom_column_name()]}@{row.name}",
                 srid=self.crs
             )
         return pymeos_point
 
-    def _create_pymeos_seq(self): 
+    def _create_pymeos_seq(self):
         x = list()
         y = list()
         for p in self.df.geometry:
             x.append(p.x)
             y.append(p.y)
         times = self.df.index
-        
-        pymeos_seq = pymeos.TPointSeq.from_arrays(times, x, y, None, \
-            self.df.crs.to_epsg(), self.is_latlon, True, True, True, False)
+
+        pymeos_seq = pymeos.TPointSeq.from_arrays(times, x, y, None, self.df.crs.to_epsg(), self.is_latlon, True, True,
+                                                  True, False)
         return pymeos_seq
 
     def _check_timezone_exist(self):
@@ -205,9 +211,9 @@ class Trajectory:
     def __eq__(self, other):
         # TODO: make bullet proof
         return (
-            str(self) == str(other)
-            and self.crs == other.crs
-            and self.parent == other.parent
+                str(self) == str(other)
+                and self.crs == other.crs
+                and self.parent == other.parent
         )
 
     def size(self):
@@ -437,9 +443,9 @@ class Trajectory:
         GeoDataFrame
         """
         point_gdf = self.df.copy()
-        if compat.USE_PYMEOS and self.get_pymeos_point_column_name() in self.df.columns:
+        if self.pymeos_backend and self.get_pymeos_point_column_name() in self.df.columns:
             point_gdf.drop(
-                columns=[self.get_pymeos_point_column_name()], 
+                columns=[self.get_pymeos_point_column_name()],
                 inplace=True
             )
         return point_gdf
@@ -453,9 +459,9 @@ class Trajectory:
         GeoDataFrame
         """
         line_gdf = self._to_line_df()
-        if compat.USE_PYMEOS and self.get_pymeos_point_column_name() in self.df.columns:
+        if self.pymeos_backend and self.get_pymeos_point_column_name() in self.df.columns:
             line_gdf.drop(
-                columns=[self.get_pymeos_point_column_name()], 
+                columns=[self.get_pymeos_point_column_name()],
                 inplace=True
             )
         line_gdf.drop(columns=[self.get_geom_column_name(), "prev_pt"], inplace=True)
@@ -919,9 +925,8 @@ class Trajectory:
                 f"Use overwrite=True to overwrite exiting values or update the "
                 f"name arg."
             )
-        if compat.USE_PYMEOS:
-            pymeos_seq = self._create_pymeos_seq()
-            speed_seq = pymeos_seq.speed
+        if self.pymeos_backend:
+            speed_seq = self._pymeos_sequence.speed
             tz_exist = self._check_timezone_exist()
             if tz_exist:
                 data = [(instant.value, instant.timestamp) for instant in speed_seq.instants]
@@ -930,7 +935,8 @@ class Trajectory:
             df_speed = DataFrame(data, columns=[name, 't']).set_index('t')
             # TODO: Speed calculated by PyMEOS is different from MVP implementation 
             # assert len(df_speed) == len(self.df)
-            self.df[name] = df_speed
+            self.df[self.speed_col_name] = df_speed
+            self.df[self.speed_col_name].fillna(method='ffill')
         else:
             self.df = self._get_df_with_speed(name)
 

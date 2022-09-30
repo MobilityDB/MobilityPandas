@@ -207,8 +207,8 @@ class DouglasPeuckerGeneralizer(TrajectoryGeneralizer):
     """
 
     def _generalize_traj(self, traj, tolerance):
-        if compact.USE_PYMEOS:
-            pymeos_seq = traj._create_pymeos_seq()
+        if traj.pymeos_backend:
+            pymeos_seq = traj._pymeos_sequence
             simplified_seq = pymeos_seq.simplify(synchronized=False, tolerance=tolerance)
             simplified_coords = [value.coords[0] for value in simplified_seq.values]
         else:
@@ -257,7 +257,12 @@ class TopDownTimeRatioGeneralizer(TrajectoryGeneralizer):
     """
 
     def _generalize_traj(self, traj, tolerance):
-        generalized = self.td_tr(traj.df.copy(), tolerance)
+        if traj.pymeos_backend:
+            pymeos_seq = traj._pymeos_sequence
+            simplified_seq = pymeos_seq.simplify(synchronized=False, tolerance=tolerance)
+            generalized = simplified_seq.to_geodataframe()
+        else:
+            generalized = self.td_tr(traj.df.copy(), tolerance)
         return Trajectory(generalized, traj.id)
 
     def td_tr(self, df, tolerance):
