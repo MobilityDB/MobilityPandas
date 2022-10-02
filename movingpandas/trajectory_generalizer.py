@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 
 from copy import copy
-from shapely.geometry import LineString, Point
+
 import pandas as pd
+from shapely.geometry import LineString, Point
 
 try:
     import pymeos
 except ImportError:
     pymeos = None
 
-from . import _compat as compact
 from .trajectory import Trajectory
 from .trajectory_collection import TrajectoryCollection
 from .geometry_utils import measure_distance_geodesic, measure_distance_euclidean
@@ -210,11 +210,11 @@ class DouglasPeuckerGeneralizer(TrajectoryGeneralizer):
         if traj.pymeos_backend:
             pymeos_seq = traj._pymeos_sequence
             simplified_seq = pymeos_seq.simplify(synchronized=False, tolerance=tolerance)
-            simplified_coords = [value.coords[0] for value in simplified_seq.values]
-        else:
-            simplified_coords = (
-                traj.to_linestring().simplify(tolerance, preserve_topology=False).coords
-            )
+            gframe = simplified_seq.to_geodataframe()
+            return Trajectory(gframe, traj.id, t='time', pymeos_backend=True, _pymeos_inner=simplified_seq)
+        simplified_coords = (
+            traj.to_linestring().simplify(tolerance, preserve_topology=False).coords
+        )
 
         keep_rows = []
         i = 0
@@ -260,7 +260,8 @@ class TopDownTimeRatioGeneralizer(TrajectoryGeneralizer):
         if traj.pymeos_backend:
             pymeos_seq = traj._pymeos_sequence
             simplified_seq = pymeos_seq.simplify(synchronized=False, tolerance=tolerance)
-            generalized = simplified_seq.to_geodataframe()
+            gframe = simplified_seq.to_geodataframe()
+            return Trajectory(gframe, traj.id, t='time', pymeos_backend=True, _pymeos_inner=simplified_seq)
         else:
             generalized = self.td_tr(traj.df.copy(), tolerance)
         return Trajectory(generalized, traj.id)
@@ -270,7 +271,7 @@ class TopDownTimeRatioGeneralizer(TrajectoryGeneralizer):
             return df
         else:
             de = (
-                df.index.max().to_pydatetime() - df.index.min().to_pydatetime()
+                    df.index.max().to_pydatetime() - df.index.min().to_pydatetime()
             ).total_seconds()
 
             t0 = df.index.min().to_pydatetime()
@@ -293,7 +294,7 @@ class TopDownTimeRatioGeneralizer(TrajectoryGeneralizer):
                             df.iloc[: df.index.get_loc(dists.idxmax()) + 1], tolerance
                         ),
                         self.td_tr(
-                            df.iloc[df.index.get_loc(dists.idxmax()) :], tolerance
+                            df.iloc[df.index.get_loc(dists.idxmax()):], tolerance
                         ),
                     ]
                 )

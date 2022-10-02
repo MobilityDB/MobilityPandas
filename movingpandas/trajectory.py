@@ -7,6 +7,7 @@ from geopandas import GeoDataFrame
 from geopy.distance import geodesic
 from pandas import DataFrame, to_datetime
 from pandas.core.indexes.datetimes import DatetimeIndex
+from pymeos import TInterpolation
 from shapely.affinity import translate
 from shapely.geometry import Point, LineString
 
@@ -14,7 +15,7 @@ try:
     import pymeos as pymeos
 
     # TODO: design issue: when to initialize and finalize
-    pymeos.meos_initialize()
+    pymeos.pymeos_initialize()
 except ImportError:
     warnings.warn('PyMEOS is not installed')
     pymeos = None
@@ -57,7 +58,8 @@ class Trajectory:
             y=None,
             crs="epsg:4326",
             parent=None,
-            pymeos_backend=False
+            pymeos_backend=False,
+            _pymeos_inner=None
     ):
         """
         Create Trajectory from GeoDataFrame or DataFrame.
@@ -149,7 +151,10 @@ class Trajectory:
         if self.pymeos_backend:
             self._recreate_pymeos = False
             self._pymeos_point_column_name = PYMEOS_POINT_COL_NAME
-            self._pymeos_sequence = self._create_pymeos_seq()
+            if _pymeos_inner is None:
+                self._pymeos_sequence = self._create_pymeos_seq()
+            else:
+                self._pymeos_sequence = _pymeos_inner
 
     def _create_pymeos_point_column(self):
         self.df[self.get_pymeos_point_column_name()] = \
@@ -177,7 +182,7 @@ class Trajectory:
         times = self.df.index
 
         pymeos_seq = pymeos.TPointSeq.from_arrays(times, x, y, None, self.df.crs.to_epsg(), self.is_latlon, True, True,
-                                                  True, False)
+                                                  TInterpolation.LINEAR, False)
         return pymeos_seq
 
     def _check_timezone_exist(self):
@@ -936,7 +941,7 @@ class Trajectory:
             # TODO: Speed calculated by PyMEOS is different from MVP implementation 
             # assert len(df_speed) == len(self.df)
             self.df[self.speed_col_name] = df_speed
-            self.df[self.speed_col_name].fillna(method='ffill')
+            self.df[self.speed_col_name] = self.df[self.speed_col_name].fillna(method='ffill')
         else:
             self.df = self._get_df_with_speed(name)
 
